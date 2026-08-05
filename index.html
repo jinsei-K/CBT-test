@@ -3,9 +3,36 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>CBTテストシステム</title>
+  <title>CBTテストシステム (クラウド版)</title>
   <!-- グラフ描画用ライブラリ (Chart.js) -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+  <!-- Firebase SDK (v10) の読み込み -->
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+    import { 
+      getFirestore, collection, addDoc, getDocs, doc, setDoc, deleteDoc, query, where 
+    } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+
+    // ★★★ ご自身の Firebase 設定情報に書き換えてください ★★★
+    const firebaseConfig = {
+      apiKey: "AIzaSyDDFMUpfFHdRfLA0lwGUT7pbMsQuAIn2nQ",
+      authDomain: "cbttest-rog.firebaseapp.com",
+      projectId: "cbttest-rog",
+      storageBucket: "cbttest-rog.firebasestorage.app",
+      messagingSenderId: "1032327185469",
+      appId: "G-N09XNLSWYH"
+    };
+
+    // Firebase 初期化
+    const app = initializeApp(firebaseConfig);
+    const db = getFirestore(app);
+
+    // グローバル変数へ登録
+    window.db = db;
+    window.dbFuncs = { collection, addDoc, getDocs, doc, setDoc, deleteDoc, query, where };
+  </script>
+
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: "Helvetica Neue", Arial, sans-serif; background-color: #f4f6f9; color: #333; line-height: 1.6; padding: 20px; }
@@ -47,7 +74,7 @@
   <!-- ==================== 1. 生徒用：テスト選択画面 ==================== -->
   <div id="view-student-select" class="view">
     <h3>受検するテストを選択してください</h3>
-    <div id="student-test-list"></div>
+    <div id="student-test-list">クラウドからデータを読み込んでいます...</div>
   </div>
 
   <!-- ==================== 2. 生徒用：受検者情報入力画面 ==================== -->
@@ -75,7 +102,7 @@
     <form id="test-form"></form>
     
     <div style="margin-top: 20px;">
-      <button class="btn btn-success" onclick="submitTest()">解答を提出する</button>
+      <button class="btn btn-success" id="submit-btn" onclick="submitTest()">解答を提出する</button>
     </div>
   </div>
 
@@ -84,7 +111,7 @@
     <h3>管理者認証</h3>
     <div class="card">
       <label>管理者パスワード</label>
-      <input type="password" id="admin-password-input" placeholder="パスワードを入力">
+      <input type="password" id="admin-password-input" placeholder="初期パスワード: admin">
       <button class="btn" onclick="loginAdmin()">ログイン</button>
     </div>
   </div>
@@ -101,13 +128,13 @@
 
     <!-- 5-1. テスト一覧 -->
     <div id="admin-tab-tests" class="admin-tab">
-      <h4>作成済みテスト一覧</h4>
+      <h4>作成済みテスト一覧（クラウド）</h4>
       <div id="admin-test-list"></div>
     </div>
 
     <!-- 5-2. 新規テスト作成 -->
     <div id="admin-tab-create-test" class="admin-tab hidden">
-      <h4>新規テスト作成</h4>
+      <h4>新規テスト作成（クラウド保存）</h4>
       <div class="card">
         <label>教科名</label>
         <input type="text" id="new-test-subject" placeholder="例: 数学">
@@ -120,13 +147,13 @@
         <button class="btn btn-secondary" onclick="addQuestionField()">＋ 問題を追加</button>
         
         <hr style="margin: 20px 0;">
-        <button class="btn btn-success" onclick="saveNewTest()">テストを保存する</button>
+        <button class="btn btn-success" onclick="saveNewTest()">テストをクラウドに保存</button>
       </div>
     </div>
 
     <!-- 5-3. 解答・成績分析 -->
     <div id="admin-tab-results" class="admin-tab hidden">
-      <h4>成績・解答状況一覧</h4>
+      <h4>成績・解答状況一覧（クラウド一括集計）</h4>
       <label>対象テストの選択</label>
       <select id="result-test-select" onchange="renderAnalytics()"></select>
 
@@ -167,23 +194,15 @@
         <input type="password" id="pass-new">
         <button class="btn btn-primary" onclick="changeAdminPassword()">パスワード変更</button>
       </div>
-      
-      <h4 style="margin-top: 30px;">全データ初期化</h4>
-      <div class="card">
-        <button class="btn btn-danger" onclick="resetAllAppSystemData()">すべてのテストと解答データを完全消去</button>
-      </div>
     </div>
   </div>
 </div>
 
 <script>
 // ==================== グローバル構造・初期データ ====================
-let appData = {
-  adminPasswordHash: "8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918", // 初期パスワード "admin" のSHA-256
-  tests: [],
-  responses: []
-};
+let adminPasswordHash = localStorage.getItem('admin_pass_hash') || "8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918"; // 初期パスワード "admin"
 
+let tests = [];
 let currentTest = null;
 let currentStudent = null;
 let violationCount = 0;
@@ -195,49 +214,23 @@ async function sha256(str) {
   return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
-// データ保存・読み込み
-function saveData() {
-  localStorage.setItem('cbt_app_data', JSON.stringify(appData));
-}
-
-function loadData() {
-  const saved = localStorage.getItem('cbt_app_data');
-  if (saved) {
-    appData = JSON.parse(saved);
-  } else {
-    // デモ用デフォルトデータ作成
-    appData.tests.push({
-      id: "demo_math",
-      subject: "数学",
-      title: "【サンプル】計算問題テスト",
-      questions: [
-        {
-          id: "q1",
-          type: "single",
-          text: "1 + 1 の答えはどれですか？",
-          options: ["1", "2", "3", "4"],
-          correct: ["2"],
-          randomize: true
-        },
-        {
-          id: "q2",
-          type: "multiple",
-          text: "偶数をすべて選んでください。（複数選択）",
-          options: ["2", "3", "4", "5"],
-          correct: ["2", "4"],
-          randomize: true
-        },
-        {
-          id: "q3",
-          type: "text",
-          text: "「三角形の内角の和は何度か」数字のみ記述してください。",
-          options: [],
-          correct: ["180"],
-          randomize: false
-        }
-      ]
+// クラウド（Firestore）からテスト一覧を取得
+async function loadTestsFromCloud() {
+  const container = document.getElementById('student-test-list');
+  if (container) container.innerHTML = '読み込み中...';
+  
+  try {
+    const { collection, getDocs } = window.dbFuncs;
+    const querySnapshot = await getDocs(collection(window.db, "tests"));
+    tests = [];
+    querySnapshot.forEach((doc) => {
+      tests.push({ id: doc.id, ...doc.data() });
     });
-    saveData();
+    renderStudentTestList();
+    checkUrlParams();
+  } catch (e) {
+    console.error("Firebase load error:", e);
+    if (container) container.innerHTML = 'データの読み込みに失敗しました。';
   }
 }
 
@@ -256,16 +249,16 @@ function switchView(viewId) {
   document.querySelectorAll('.view').forEach(el => el.classList.add('hidden'));
   document.getElementById(`view-${viewId}`).classList.remove('hidden');
 
-  if (viewId === 'student-select') renderStudentTestList();
+  if (viewId === 'student-select') loadTestsFromCloud();
   if (viewId === 'admin-dashboard') renderAdminTestList();
 }
 
-// URLパラメータ経由のダイレクト起動チェック（教科・テストリンク機能）
+// URLパラメータ経由のダイレクト起動チェック
 function checkUrlParams() {
   const urlParams = new URLSearchParams(window.location.search);
   const testId = urlParams.get('testId');
   if (testId) {
-    const test = appData.tests.find(t => t.id === testId);
+    const test = tests.find(t => t.id === testId);
     if (test) {
       selectTestForStudent(test.id);
     }
@@ -276,11 +269,11 @@ function checkUrlParams() {
 function renderStudentTestList() {
   const container = document.getElementById('student-test-list');
   container.innerHTML = '';
-  if (appData.tests.length === 0) {
+  if (tests.length === 0) {
     container.innerHTML = '<p>現在公開されているテストはありません。</p>';
     return;
   }
-  appData.tests.forEach(test => {
+  tests.forEach(test => {
     const card = document.createElement('div');
     card.className = 'card';
     card.innerHTML = `
@@ -293,7 +286,7 @@ function renderStudentTestList() {
 }
 
 function selectTestForStudent(testId) {
-  currentTest = appData.tests.find(t => t.id === testId);
+  currentTest = tests.find(t => t.id === testId);
   document.getElementById('entry-test-title').innerText = `【${currentTest.subject}】${currentTest.title}`;
   switchView('student-entry');
 }
@@ -311,15 +304,11 @@ function startTest() {
   currentStudent = { class: cls, number: num, name: name };
   violationCount = 0;
 
-  // テスト画面生成
   renderTestForm();
-  
-  // 自動保存復元チェック
   loadDraftAnswers();
 
   switchView('test-screen');
 
-  // 全画面モード試行（不正対策）
   if (document.documentElement.requestFullscreen) {
     document.documentElement.requestFullscreen().catch(() => {});
   }
@@ -335,8 +324,6 @@ function renderTestForm() {
     qCard.className = 'card';
     
     let html = `<h5>問${idx + 1}. ${q.text}</h5>`;
-
-    // 答えのランダム表示判定
     let displayOptions = q.randomize ? shuffleArray(q.options) : q.options;
 
     if (q.type === 'single') {
@@ -356,7 +343,7 @@ function renderTestForm() {
   });
 }
 
-// 自動ローカル保存 (localStorage)
+// 端末ローカルへの一時保存（テスト途中脱落対策）
 function autoSaveDraft() {
   const answers = getEnteredAnswers();
   const draftKey = `cbt_draft_${currentTest.id}_${currentStudent.class}_${currentStudent.number}`;
@@ -409,12 +396,17 @@ function getEnteredAnswers() {
   return answers;
 }
 
-function submitTest() {
+// クラウド送信処理
+async function submitTest() {
   if (!confirm('解答を提出しますか？')) return;
+
+  const btn = document.getElementById('submit-btn');
+  btn.disabled = true;
+  btn.innerText = "送信中...";
 
   const userAnswers = getEnteredAnswers();
   
-  // 採点ロジック
+  // 採点
   let score = 0;
   const totalQuestions = currentTest.questions.length;
   const pointsPerQuestion = 100 / totalQuestions;
@@ -423,35 +415,41 @@ function submitTest() {
     const userAns = userAnswers[q.id] || [];
     const correctAns = q.correct || [];
 
-    // 配列比較（ソートして一致確認）
     if (JSON.stringify([...userAns].sort()) === JSON.stringify([...correctAns].sort())) {
       score += pointsPerQuestion;
     }
   });
 
-  // 結果追加
-  appData.responses.push({
-    testId: currentTest.id,
-    student: currentStudent,
-    answers: userAnswers,
-    score: Math.round(score),
-    violations: violationCount,
-    submittedAt: new Date().toLocaleString()
-  });
+  // Firestoreに登録
+  try {
+    const { collection, addDoc } = window.dbFuncs;
+    await addDoc(collection(window.db, "responses"), {
+      testId: currentTest.id,
+      student: currentStudent,
+      answers: userAnswers,
+      score: Math.round(score),
+      violations: violationCount,
+      submittedAt: new Date().toLocaleString()
+    });
 
-  saveData();
+    // 下書きデータ削除
+    const draftKey = `cbt_draft_${currentTest.id}_${currentStudent.class}_${currentStudent.number}`;
+    localStorage.removeItem(draftKey);
 
-  // 下書きデータ削除
-  const draftKey = `cbt_draft_${currentTest.id}_${currentStudent.class}_${currentStudent.number}`;
-  localStorage.removeItem(draftKey);
-
-  alert(`解答を送信しました。\nあなたの得点: ${Math.round(score)}点`);
-  
-  if (document.exitFullscreen) document.exitFullscreen().catch(() => {});
-  switchView('student-select');
+    alert(`解答を送信しました。\nあなたの得点: ${Math.round(score)}点`);
+    
+    if (document.exitFullscreen) document.exitFullscreen().catch(() => {});
+    switchView('student-select');
+  } catch (e) {
+    console.error(e);
+    alert("送信エラーが発生しました。インターネット接続を確認してください。");
+  } finally {
+    btn.disabled = false;
+    btn.innerText = "解答を提出する";
+  }
 }
 
-// 不正検知（画面非表示・タブ切替・フォーカス外れ）
+// 不正検知
 document.addEventListener("visibilitychange", () => {
   if (document.hidden && !document.getElementById('view-test-screen').classList.contains('hidden')) {
     handleViolation("タブ切替または別アプリの起動");
@@ -471,7 +469,7 @@ function handleViolation(reason) {
   warnEl.innerText = `⚠️ 警告: ${reason}を検知しました！（累計 ${violationCount} 回）`;
 }
 
-// コピペ・右クリック・ショートカット制限
+// 操作制限
 document.addEventListener('contextmenu', e => {
   if (!document.getElementById('view-test-screen').classList.contains('hidden')) e.preventDefault();
 });
@@ -487,7 +485,7 @@ async function loginAdmin() {
   const pass = document.getElementById('admin-password-input').value;
   const hash = await sha256(pass);
   
-  if (hash === appData.adminPasswordHash) {
+  if (hash === adminPasswordHash) {
     document.getElementById('admin-password-input').value = '';
     switchView('admin-dashboard');
   } else {
@@ -503,22 +501,20 @@ function switchAdminTab(tabName) {
   if (tabName === 'results') initResultsView();
 }
 
-// テスト・問題一覧表示 ＆ 削除
 function renderAdminTestList() {
   const container = document.getElementById('admin-test-list');
   container.innerHTML = '';
 
-  appData.tests.forEach((test, tIdx) => {
+  tests.forEach((test) => {
     const card = document.createElement('div');
     card.className = 'card';
     
-    // 直リンク生成
     const testUrl = `${window.location.origin}${window.location.pathname}?testId=${test.id}`;
 
     let html = `
       <div style="display:flex; justify-content:space-between; align-items:center;">
         <h4>[${test.subject}] ${test.title}</h4>
-        <button class="btn btn-danger" onclick="deleteTest(${tIdx})">テスト全体を削除</button>
+        <button class="btn btn-danger" onclick="deleteTestFromCloud('${test.id}')">テスト全体を削除</button>
       </div>
       <p style="margin: 5px 0;"><strong>受検URL:</strong> <input type="text" value="${testUrl}" readonly onclick="this.select()"></p>
       <h5>問題一覧 (${test.questions.length}問):</h5>
@@ -530,7 +526,7 @@ function renderAdminTestList() {
         <li style="margin-bottom:8px;">
           ${q.text} (形式: ${q.type}) 
           <br><small>正解: ${q.correct.join(', ')}</small>
-          <button class="btn btn-danger" style="padding:2px 6px; font-size:10px; margin-left:10px;" onclick="deleteQuestion(${tIdx}, ${qIdx})">問題を削除</button>
+          <button class="btn btn-danger" style="padding:2px 6px; font-size:10px; margin-left:10px;" onclick="deleteQuestionFromCloud('${test.id}', ${qIdx})">問題を削除</button>
         </li>
       `;
     });
@@ -541,23 +537,35 @@ function renderAdminTestList() {
   });
 }
 
-function deleteTest(testIdx) {
-  if (confirm('このテストおよび登録された問題を全て削除しますか？')) {
-    appData.tests.splice(testIdx, 1);
-    saveData();
-    renderAdminTestList();
+// クラウド上のテスト削除
+async function deleteTestFromCloud(testId) {
+  if (confirm('このテストおよび登録された問題をクラウドから削除しますか？')) {
+    const { doc, deleteDoc } = window.dbFuncs;
+    await deleteDoc(doc(window.db, "tests", testId));
+    await loadTestsFromCloud();
   }
 }
 
-function deleteQuestion(testIdx, questionIdx) {
+// クラウド上の指定問題削除
+async function deleteQuestionFromCloud(testId, questionIdx) {
   if (confirm('この問題を削除しますか？')) {
-    appData.tests[testIdx].questions.splice(questionIdx, 1);
-    saveData();
-    renderAdminTestList();
+    const targetTest = tests.find(t => t.id === testId);
+    if (!targetTest) return;
+
+    targetTest.questions.splice(questionIdx, 1);
+
+    const { doc, setDoc } = window.dbFuncs;
+    await setDoc(doc(window.db, "tests", testId), {
+      subject: targetTest.subject,
+      title: targetTest.title,
+      questions: targetTest.questions
+    });
+
+    await loadTestsFromCloud();
   }
 }
 
-// 動的テスト作成機能
+// 動的テスト作成
 let newQuestionCount = 0;
 function addQuestionField() {
   newQuestionCount++;
@@ -588,7 +596,7 @@ function addQuestionField() {
   container.appendChild(qDiv);
 }
 
-function saveNewTest() {
+async function saveNewTest() {
   const subject = document.getElementById('new-test-subject').value.trim();
   const title = document.getElementById('new-test-title').value.trim();
 
@@ -624,30 +632,33 @@ function saveNewTest() {
     return;
   }
 
-  const newTest = {
-    id: `test_${Date.now()}`,
-    subject: subject,
-    title: title,
-    questions: questions
-  };
+  try {
+    const { collection, addDoc } = window.dbFuncs;
+    await addDoc(collection(window.db, "tests"), {
+      subject: subject,
+      title: title,
+      questions: questions
+    });
 
-  appData.tests.push(newTest);
-  saveData();
-
-  alert('テストを作成しました！');
-  document.getElementById('new-test-subject').value = '';
-  document.getElementById('new-test-title').value = '';
-  document.getElementById('question-builder-container').innerHTML = '';
-  newQuestionCount = 0;
-  
-  switchAdminTab('tests');
+    alert('クラウドにテストを保存・公開しました！');
+    document.getElementById('new-test-subject').value = '';
+    document.getElementById('new-test-title').value = '';
+    document.getElementById('question-builder-container').innerHTML = '';
+    newQuestionCount = 0;
+    
+    await loadTestsFromCloud();
+    switchAdminTab('tests');
+  } catch (e) {
+    console.error(e);
+    alert("テストの保存に失敗しました。");
+  }
 }
 
-// 分析＆集計表示機能
+// 分析＆集計表示機能 (リアルタイムクラウド集計)
 function initResultsView() {
   const select = document.getElementById('result-test-select');
   select.innerHTML = '';
-  appData.tests.forEach(test => {
+  tests.forEach(test => {
     const opt = document.createElement('option');
     opt.value = test.id;
     opt.innerText = `[${test.subject}] ${test.title}`;
@@ -656,79 +667,104 @@ function initResultsView() {
   renderAnalytics();
 }
 
-function renderAnalytics() {
+async function renderAnalytics() {
   const testId = document.getElementById('result-test-select').value;
-  const filteredResponses = appData.responses.filter(r => r.testId === testId);
+  if (!testId) return;
 
-  // 表の描画
   const tbody = document.getElementById('result-table-body');
-  tbody.innerHTML = '';
+  tbody.innerHTML = '<tr><td colspan="6">クラウドからデータを集計中...</td></tr>';
 
-  let totalScore = 0;
-  const scoreBins = new Array(10).fill(0); // 0-9, 10-19... 90-100点台
+  try {
+    const { collection, getDocs, query, where } = window.dbFuncs;
+    const q = query(collection(window.db, "responses"), where("testId", "==", testId));
+    const querySnapshot = await getDocs(q);
 
-  filteredResponses.forEach(res => {
-    totalScore += res.score;
-    const binIdx = Math.min(Math.floor(res.score / 10), 9);
-    scoreBins[binIdx]++;
+    tbody.innerHTML = '';
 
-    const tr = document.createElement('tr');
-    tr.innerHTML = `
-      <td>${res.student.class}</td>
-      <td>${res.student.number}</td>
-      <td>${res.student.name}</td>
-      <td><strong>${res.score}</strong> 点</td>
-      <td><span class="${res.violations > 0 ? 'warning' : ''}">${res.violations} 回</span></td>
-      <td>${res.submittedAt}</td>
-    `;
-    tbody.appendChild(tr);
-  });
+    let totalScore = 0;
+    let count = 0;
+    const scoreBins = new Array(10).fill(0);
 
-  const count = filteredResponses.length;
-  const avg = count > 0 ? (totalScore / count).toFixed(1) : 0;
+    querySnapshot.forEach((doc) => {
+      const res = doc.data();
+      count++;
+      totalScore += res.score;
+      const binIdx = Math.min(Math.floor(res.score / 10), 9);
+      scoreBins[binIdx]++;
 
-  document.getElementById('stat-count').innerText = count;
-  document.getElementById('stat-avg').innerText = avg;
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td>${res.student.class}</td>
+        <td>${res.student.number}</td>
+        <td>${res.student.name}</td>
+        <td><strong>${res.score}</strong> 点</td>
+        <td><span class="${res.violations > 0 ? 'warning' : ''}">${res.violations} 回</span></td>
+        <td>${res.submittedAt}</td>
+      `;
+      tbody.appendChild(tr);
+    });
 
-  // Chart.js 棒グラフ描画
-  const ctx = document.getElementById('scoreChart').getContext('2d');
-  if (scoreChartInstance) scoreChartInstance.destroy();
+    const avg = count > 0 ? (totalScore / count).toFixed(1) : 0;
+    document.getElementById('stat-count').innerText = count;
+    document.getElementById('stat-avg').innerText = avg;
 
-  scoreChartInstance = new Chart(ctx, {
-    type: 'bar',
-    data: {
-      labels: ['0-9', '10-19', '20-29', '30-39', '40-49', '50-59', '60-69', '70-79', '80-89', '90-100'],
-      datasets: [{
-        label: '人数',
-        data: scoreBins,
-        backgroundColor: '#3498db'
-      }]
-    },
-    options: {
-      scales: {
-        y: { beginAtZero: true, stepSize: 1 }
+    // Chart.js グラフ描画
+    const ctx = document.getElementById('scoreChart').getContext('2d');
+    if (scoreChartInstance) scoreChartInstance.destroy();
+
+    scoreChartInstance = new Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels: ['0-9', '10-19', '20-29', '30-39', '40-49', '50-59', '60-69', '70-79', '80-89', '90-100'],
+        datasets: [{
+          label: '人数',
+          data: scoreBins,
+          backgroundColor: '#3498db'
+        }]
+      },
+      options: {
+        scales: {
+          y: { beginAtZero: true, stepSize: 1 }
+        }
       }
-    }
-  });
-}
-
-// 成績リセット
-function resetResults() {
-  const testId = document.getElementById('result-test-select').value;
-  if (confirm('このテストの全受検結果をリセットしますか？（復元できません）')) {
-    appData.responses = appData.responses.filter(r => r.testId !== testId);
-    saveData();
-    renderAnalytics();
+    });
+  } catch (e) {
+    console.error(e);
+    tbody.innerHTML = '<tr><td colspan="6">集計データの取得に失敗しました。</td></tr>';
   }
 }
 
-// 管理者パスワード変更
+// クラウド上の解答データリセット
+async function resetResults() {
+  const testId = document.getElementById('result-test-select').value;
+  if (confirm('このテストの全受検結果をクラウドから削除しますか？（復元できません）')) {
+    try {
+      const { collection, getDocs, query, where, doc, deleteDoc } = window.dbFuncs;
+      const q = query(collection(window.db, "responses"), where("testId", "==", testId));
+      const querySnapshot = await getDocs(q);
+
+      const deletePromises = [];
+      querySnapshot.forEach((d) => {
+        deletePromises.push(deleteDoc(doc(window.db, "responses", d.id)));
+      });
+
+      await Promise.all(deletePromises);
+      alert("成績データを初期化しました。");
+      renderAnalytics();
+    } catch (e) {
+      console.error(e);
+      alert("削除処理中にエラーが発生しました。");
+    }
+  }
+}
+
+// パスワード変更
 async function changeAdminPassword() {
   const current = document.getElementById('pass-current').value;
   const newPass = document.getElementById('pass-new').value;
 
   const currentHash = await sha256(current);
-  if (currentHash !== appData.adminPasswordHash) {
+  if (currentHash !== adminPasswordHash) {
     alert('現在のパスワードが正しくありません。');
     return;
   }
@@ -738,25 +774,19 @@ async function changeAdminPassword() {
     return;
   }
 
-  appData.adminPasswordHash = await sha256(newPass);
-  saveData();
+  adminPasswordHash = await sha256(newPass);
+  localStorage.setItem('admin_pass_hash', adminPasswordHash);
   alert('管理者パスワードを変更しました。');
   document.getElementById('pass-current').value = '';
   document.getElementById('pass-new').value = '';
 }
 
-// アプリ全体の全データ初期化
-function resetAllAppSystemData() {
-  if (confirm('すべてのテスト、問題、成績データを初期化しますか？')) {
-    localStorage.removeItem('cbt_app_data');
-    location.reload();
-  }
-}
-
-// 初期化実行
+// 初期起動
 window.onload = () => {
-  loadData();
-  checkUrlParams();
+  // Firebaseの初期化完了をわずかに待って起動
+  setTimeout(() => {
+    loadTestsFromCloud();
+  }, 500);
 };
 </script>
 </body>
