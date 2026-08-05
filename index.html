@@ -1,0 +1,763 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CBTテストシステム</title>
+  <!-- グラフ描画用ライブラリ (Chart.js) -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: "Helvetica Neue", Arial, sans-serif; background-color: #f4f6f9; color: #333; line-height: 1.6; padding: 20px; }
+    .container { max-width: 900px; margin: 0 auto; background: #fff; padding: 30px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+    h1, h2, h3 { margin-bottom: 15px; color: #2c3e50; }
+    .btn { display: inline-block; padding: 10px 18px; border: none; border-radius: 4px; background: #3498db; color: #fff; cursor: pointer; font-size: 14px; margin-right: 5px; margin-bottom: 5px; }
+    .btn:hover { background: #2980b9; }
+    .btn-danger { background: #e74c3c; }
+    .btn-danger:hover { background: #c0392b; }
+    .btn-success { background: #2ecc71; }
+    .btn-success:hover { background: #27ae60; }
+    .btn-secondary { background: #7f8c8d; }
+    .btn-secondary:hover { background: #95a5a6; }
+    input[type="text"], input[type="password"], select, textarea { width: 100%; padding: 10px; margin-bottom: 12px; border: 1px solid #ccc; border-radius: 4px; font-size: 14px; }
+    .card { background: #f8f9fa; border: 1px solid #e9ecef; border-radius: 6px; padding: 15px; margin-bottom: 15px; }
+    .hidden { display: none !important; }
+    .warning { color: #e74c3c; font-weight: bold; margin-bottom: 10px; }
+    table { width: 100%; border-collapse: collapse; margin-top: 15px; }
+    th, td { border: 1px solid #ddd; padding: 10px; text-align: left; }
+    th { background: #f1f2f6; }
+    .badge { padding: 4px 8px; border-radius: 4px; font-size: 12px; color: #fff; }
+    .badge-primary { background: #3498db; }
+    .badge-warning { background: #f39c12; }
+    .nav-bar { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #eee; padding-bottom: 10px; margin-bottom: 20px; }
+  </style>
+</head>
+<body>
+
+<div class="container">
+  <!-- ナビゲーションヘッダー -->
+  <div class="nav-bar">
+    <h2 id="app-title">CBTテストシステム</h2>
+    <div>
+      <button class="btn btn-secondary" onclick="switchView('student-select')">受検画面へ</button>
+      <button class="btn btn-secondary" onclick="switchView('admin-login')">管理者画面へ</button>
+    </div>
+  </div>
+
+  <!-- ==================== 1. 生徒用：テスト選択画面 ==================== -->
+  <div id="view-student-select" class="view">
+    <h3>受検するテストを選択してください</h3>
+    <div id="student-test-list"></div>
+  </div>
+
+  <!-- ==================== 2. 生徒用：受検者情報入力画面 ==================== -->
+  <div id="view-student-entry" class="view hidden">
+    <h3 id="entry-test-title">テスト受検フォーム</h3>
+    <div class="card">
+      <label>クラス（例: 2-A）</label>
+      <input type="text" id="student-class" placeholder="例: 1-A">
+      <label>出席番号</label>
+      <input type="text" id="student-number" placeholder="例: 12">
+      <label>氏名</label>
+      <input type="text" id="student-name" placeholder="例: 山田 太郎">
+      <button class="btn btn-success" onclick="startTest()">テストを開始する</button>
+    </div>
+  </div>
+
+  <!-- ==================== 3. 生徒用：テスト解答画面 ==================== -->
+  <div id="view-test-screen" class="view hidden">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+      <h3 id="test-screen-title">テスト</h3>
+      <span class="badge badge-warning" id="save-status">自動保存完了</span>
+    </div>
+    <div id="violation-warning" class="warning hidden">⚠️ 警告: 他のタブまたはアプリへの切り替えを検知しました！ログに記録されます。</div>
+    
+    <form id="test-form"></form>
+    
+    <div style="margin-top: 20px;">
+      <button class="btn btn-success" onclick="submitTest()">解答を提出する</button>
+    </div>
+  </div>
+
+  <!-- ==================== 4. 管理者：ログイン画面 ==================== -->
+  <div id="view-admin-login" class="view hidden">
+    <h3>管理者認証</h3>
+    <div class="card">
+      <label>管理者パスワード</label>
+      <input type="password" id="admin-password-input" placeholder="パスワードを入力">
+      <button class="btn" onclick="loginAdmin()">ログイン</button>
+    </div>
+  </div>
+
+  <!-- ==================== 5. 管理者：ダッシュボード画面 ==================== -->
+  <div id="view-admin-dashboard" class="view hidden">
+    <h3>管理者ダッシュボード</h3>
+    <div style="margin-bottom: 15px;">
+      <button class="btn" onclick="switchAdminTab('tests')">テスト・問題一覧</button>
+      <button class="btn" onclick="switchAdminTab('create-test')">新規テスト作成</button>
+      <button class="btn" onclick="switchAdminTab('results')">成績管理・分析</button>
+      <button class="btn btn-secondary" onclick="switchAdminTab('settings')">設定・パスワード変更</button>
+    </div>
+
+    <!-- 5-1. テスト一覧 -->
+    <div id="admin-tab-tests" class="admin-tab">
+      <h4>作成済みテスト一覧</h4>
+      <div id="admin-test-list"></div>
+    </div>
+
+    <!-- 5-2. 新規テスト作成 -->
+    <div id="admin-tab-create-test" class="admin-tab hidden">
+      <h4>新規テスト作成</h4>
+      <div class="card">
+        <label>教科名</label>
+        <input type="text" id="new-test-subject" placeholder="例: 数学">
+        <label>テストタイトル</label>
+        <input type="text" id="new-test-title" placeholder="例: 第1回 定期テスト">
+        
+        <hr style="margin: 20px 0;">
+        <h5>問題の追加</h5>
+        <div id="question-builder-container"></div>
+        <button class="btn btn-secondary" onclick="addQuestionField()">＋ 問題を追加</button>
+        
+        <hr style="margin: 20px 0;">
+        <button class="btn btn-success" onclick="saveNewTest()">テストを保存する</button>
+      </div>
+    </div>
+
+    <!-- 5-3. 解答・成績分析 -->
+    <div id="admin-tab-results" class="admin-tab hidden">
+      <h4>成績・解答状況一覧</h4>
+      <label>対象テストの選択</label>
+      <select id="result-test-select" onchange="renderAnalytics()"></select>
+
+      <div style="margin: 20px 0;">
+        <h5>成績サマリー</h5>
+        <p>受験者数: <span id="stat-count">0</span> 名 | 平均点: <span id="stat-avg">0</span> 点</p>
+      </div>
+
+      <div style="max-width: 600px; margin: 20px 0;">
+        <canvas id="scoreChart"></canvas>
+      </div>
+
+      <h5>生徒別解答データ一覧</h5>
+      <table id="result-table">
+        <thead>
+          <tr>
+            <th>クラス</th>
+            <th>番号</th>
+            <th>氏名</th>
+            <th>点数</th>
+            <th>不正検知回数</th>
+            <th>提出日時</th>
+          </tr>
+        </thead>
+        <tbody id="result-table-body"></tbody>
+      </table>
+
+      <button class="btn btn-danger" style="margin-top: 20px;" onclick="resetResults()">このテストの成績データをリセット</button>
+    </div>
+
+    <!-- 5-4. 設定・パスワード変更 -->
+    <div id="admin-tab-settings" class="admin-tab hidden">
+      <h4>管理者パスワード変更</h4>
+      <div class="card">
+        <label>現在のパスワード</label>
+        <input type="password" id="pass-current">
+        <label>新しいパスワード</label>
+        <input type="password" id="pass-new">
+        <button class="btn btn-primary" onclick="changeAdminPassword()">パスワード変更</button>
+      </div>
+      
+      <h4 style="margin-top: 30px;">全データ初期化</h4>
+      <div class="card">
+        <button class="btn btn-danger" onclick="resetAllAppSystemData()">すべてのテストと解答データを完全消去</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ==================== グローバル構造・初期データ ====================
+let appData = {
+  adminPasswordHash: "8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918", // 初期パスワード "admin" のSHA-256
+  tests: [],
+  responses: []
+};
+
+let currentTest = null;
+let currentStudent = null;
+let violationCount = 0;
+let scoreChartInstance = null;
+
+// SHA-256 暗号化処理関数
+async function sha256(str) {
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(str));
+  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+// データ保存・読み込み
+function saveData() {
+  localStorage.setItem('cbt_app_data', JSON.stringify(appData));
+}
+
+function loadData() {
+  const saved = localStorage.getItem('cbt_app_data');
+  if (saved) {
+    appData = JSON.parse(saved);
+  } else {
+    // デモ用デフォルトデータ作成
+    appData.tests.push({
+      id: "demo_math",
+      subject: "数学",
+      title: "【サンプル】計算問題テスト",
+      questions: [
+        {
+          id: "q1",
+          type: "single",
+          text: "1 + 1 の答えはどれですか？",
+          options: ["1", "2", "3", "4"],
+          correct: ["2"],
+          randomize: true
+        },
+        {
+          id: "q2",
+          type: "multiple",
+          text: "偶数をすべて選んでください。（複数選択）",
+          options: ["2", "3", "4", "5"],
+          correct: ["2", "4"],
+          randomize: true
+        },
+        {
+          id: "q3",
+          type: "text",
+          text: "「三角形の内角の和は何度か」数字のみ記述してください。",
+          options: [],
+          correct: ["180"],
+          randomize: false
+        }
+      ]
+    });
+    saveData();
+  }
+}
+
+// 配列シャッフル関数 (Fisher-Yates)
+function shuffleArray(arr) {
+  const newArr = [...arr];
+  for (let i = newArr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [newArr[i], newArr[j]] = [newArr[j], newArr[i]];
+  }
+  return newArr;
+}
+
+// 画面切替
+function switchView(viewId) {
+  document.querySelectorAll('.view').forEach(el => el.classList.add('hidden'));
+  document.getElementById(`view-${viewId}`).classList.remove('hidden');
+
+  if (viewId === 'student-select') renderStudentTestList();
+  if (viewId === 'admin-dashboard') renderAdminTestList();
+}
+
+// URLパラメータ経由のダイレクト起動チェック（教科・テストリンク機能）
+function checkUrlParams() {
+  const urlParams = new URLSearchParams(window.location.search);
+  const testId = urlParams.get('testId');
+  if (testId) {
+    const test = appData.tests.find(t => t.id === testId);
+    if (test) {
+      selectTestForStudent(test.id);
+    }
+  }
+}
+
+// ==================== 生徒用ロジック ====================
+function renderStudentTestList() {
+  const container = document.getElementById('student-test-list');
+  container.innerHTML = '';
+  if (appData.tests.length === 0) {
+    container.innerHTML = '<p>現在公開されているテストはありません。</p>';
+    return;
+  }
+  appData.tests.forEach(test => {
+    const card = document.createElement('div');
+    card.className = 'card';
+    card.innerHTML = `
+      <h4><span class="badge badge-primary">${test.subject}</span> ${test.title}</h4>
+      <p>問題数: ${test.questions.length}問</p>
+      <button class="btn btn-success" style="margin-top:10px;" onclick="selectTestForStudent('${test.id}')">このテストを受ける</button>
+    `;
+    container.appendChild(card);
+  });
+}
+
+function selectTestForStudent(testId) {
+  currentTest = appData.tests.find(t => t.id === testId);
+  document.getElementById('entry-test-title').innerText = `【${currentTest.subject}】${currentTest.title}`;
+  switchView('student-entry');
+}
+
+function startTest() {
+  const cls = document.getElementById('student-class').value.trim();
+  const num = document.getElementById('student-number').value.trim();
+  const name = document.getElementById('student-name').value.trim();
+
+  if (!cls || !num || !name) {
+    alert('クラス、番号、氏名を全て入力してください。');
+    return;
+  }
+
+  currentStudent = { class: cls, number: num, name: name };
+  violationCount = 0;
+
+  // テスト画面生成
+  renderTestForm();
+  
+  // 自動保存復元チェック
+  loadDraftAnswers();
+
+  switchView('test-screen');
+
+  // 全画面モード試行（不正対策）
+  if (document.documentElement.requestFullscreen) {
+    document.documentElement.requestFullscreen().catch(() => {});
+  }
+}
+
+function renderTestForm() {
+  document.getElementById('test-screen-title').innerText = currentTest.title;
+  const form = document.getElementById('test-form');
+  form.innerHTML = '';
+
+  currentTest.questions.forEach((q, idx) => {
+    const qCard = document.createElement('div');
+    qCard.className = 'card';
+    
+    let html = `<h5>問${idx + 1}. ${q.text}</h5>`;
+
+    // 答えのランダム表示判定
+    let displayOptions = q.randomize ? shuffleArray(q.options) : q.options;
+
+    if (q.type === 'single') {
+      displayOptions.forEach(opt => {
+        html += `<label style="display:block; margin:5px 0;"><input type="radio" name="q_${q.id}" value="${opt}" onchange="autoSaveDraft()"> ${opt}</label>`;
+      });
+    } else if (q.type === 'multiple') {
+      displayOptions.forEach(opt => {
+        html += `<label style="display:block; margin:5px 0;"><input type="checkbox" name="q_${q.id}" value="${opt}" onchange="autoSaveDraft()"> ${opt}</label>`;
+      });
+    } else if (q.type === 'text') {
+      html += `<input type="text" name="q_${q.id}" placeholder="解答を入力" oninput="autoSaveDraft()">`;
+    }
+
+    qCard.innerHTML = html;
+    form.appendChild(qCard);
+  });
+}
+
+// 自動ローカル保存 (localStorage)
+function autoSaveDraft() {
+  const answers = getEnteredAnswers();
+  const draftKey = `cbt_draft_${currentTest.id}_${currentStudent.class}_${currentStudent.number}`;
+  localStorage.setItem(draftKey, JSON.stringify(answers));
+  
+  const status = document.getElementById('save-status');
+  status.innerText = "自動保存中...";
+  setTimeout(() => status.innerText = "自動保存完了", 500);
+}
+
+function loadDraftAnswers() {
+  const draftKey = `cbt_draft_${currentTest.id}_${currentStudent.class}_${currentStudent.number}`;
+  const saved = localStorage.getItem(draftKey);
+  if (!saved) return;
+
+  const answers = JSON.parse(saved);
+  currentTest.questions.forEach(q => {
+    const val = answers[q.id];
+    if (!val) return;
+
+    if (q.type === 'single') {
+      const radio = document.querySelector(`input[name="q_${q.id}"][value="${val[0]}"]`);
+      if (radio) radio.checked = true;
+    } else if (q.type === 'multiple') {
+      val.forEach(v => {
+        const chk = document.querySelector(`input[name="q_${q.id}"][value="${v}"]`);
+        if (chk) chk.checked = true;
+      });
+    } else if (q.type === 'text') {
+      const txt = document.querySelector(`input[name="q_${q.id}"]`);
+      if (txt) txt.value = val[0] || '';
+    }
+  });
+}
+
+function getEnteredAnswers() {
+  const answers = {};
+  currentTest.questions.forEach(q => {
+    if (q.type === 'single') {
+      const checked = document.querySelector(`input[name="q_${q.id}"]:checked`);
+      answers[q.id] = checked ? [checked.value] : [];
+    } else if (q.type === 'multiple') {
+      const checked = document.querySelectorAll(`input[name="q_${q.id}"]:checked`);
+      answers[q.id] = Array.from(checked).map(c => c.value);
+    } else if (q.type === 'text') {
+      const txt = document.querySelector(`input[name="q_${q.id}"]`);
+      answers[q.id] = txt && txt.value.trim() ? [txt.value.trim()] : [];
+    }
+  });
+  return answers;
+}
+
+function submitTest() {
+  if (!confirm('解答を提出しますか？')) return;
+
+  const userAnswers = getEnteredAnswers();
+  
+  // 採点ロジック
+  let score = 0;
+  const totalQuestions = currentTest.questions.length;
+  const pointsPerQuestion = 100 / totalQuestions;
+
+  currentTest.questions.forEach(q => {
+    const userAns = userAnswers[q.id] || [];
+    const correctAns = q.correct || [];
+
+    // 配列比較（ソートして一致確認）
+    if (JSON.stringify([...userAns].sort()) === JSON.stringify([...correctAns].sort())) {
+      score += pointsPerQuestion;
+    }
+  });
+
+  // 結果追加
+  appData.responses.push({
+    testId: currentTest.id,
+    student: currentStudent,
+    answers: userAnswers,
+    score: Math.round(score),
+    violations: violationCount,
+    submittedAt: new Date().toLocaleString()
+  });
+
+  saveData();
+
+  // 下書きデータ削除
+  const draftKey = `cbt_draft_${currentTest.id}_${currentStudent.class}_${currentStudent.number}`;
+  localStorage.removeItem(draftKey);
+
+  alert(`解答を送信しました。\nあなたの得点: ${Math.round(score)}点`);
+  
+  if (document.exitFullscreen) document.exitFullscreen().catch(() => {});
+  switchView('student-select');
+}
+
+// 不正検知（画面非表示・タブ切替・フォーカス外れ）
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden && !document.getElementById('view-test-screen').classList.contains('hidden')) {
+    handleViolation("タブ切替または別アプリの起動");
+  }
+});
+
+window.addEventListener("blur", () => {
+  if (!document.getElementById('view-test-screen').classList.contains('hidden')) {
+    handleViolation("フォーカスが画面から離れました");
+  }
+});
+
+function handleViolation(reason) {
+  violationCount++;
+  const warnEl = document.getElementById('violation-warning');
+  warnEl.classList.remove('hidden');
+  warnEl.innerText = `⚠️ 警告: ${reason}を検知しました！（累計 ${violationCount} 回）`;
+}
+
+// コピペ・右クリック・ショートカット制限
+document.addEventListener('contextmenu', e => {
+  if (!document.getElementById('view-test-screen').classList.contains('hidden')) e.preventDefault();
+});
+document.addEventListener('copy', e => {
+  if (!document.getElementById('view-test-screen').classList.contains('hidden')) e.preventDefault();
+});
+document.addEventListener('paste', e => {
+  if (!document.getElementById('view-test-screen').classList.contains('hidden')) e.preventDefault();
+});
+
+// ==================== 管理者用ロジック ====================
+async function loginAdmin() {
+  const pass = document.getElementById('admin-password-input').value;
+  const hash = await sha256(pass);
+  
+  if (hash === appData.adminPasswordHash) {
+    document.getElementById('admin-password-input').value = '';
+    switchView('admin-dashboard');
+  } else {
+    alert('パスワードが間違っています。');
+  }
+}
+
+function switchAdminTab(tabName) {
+  document.querySelectorAll('.admin-tab').forEach(el => el.classList.add('hidden'));
+  document.getElementById(`admin-tab-${tabName}`).classList.remove('hidden');
+
+  if (tabName === 'tests') renderAdminTestList();
+  if (tabName === 'results') initResultsView();
+}
+
+// テスト・問題一覧表示 ＆ 削除
+function renderAdminTestList() {
+  const container = document.getElementById('admin-test-list');
+  container.innerHTML = '';
+
+  appData.tests.forEach((test, tIdx) => {
+    const card = document.createElement('div');
+    card.className = 'card';
+    
+    // 直リンク生成
+    const testUrl = `${window.location.origin}${window.location.pathname}?testId=${test.id}`;
+
+    let html = `
+      <div style="display:flex; justify-content:space-between; align-items:center;">
+        <h4>[${test.subject}] ${test.title}</h4>
+        <button class="btn btn-danger" onclick="deleteTest(${tIdx})">テスト全体を削除</button>
+      </div>
+      <p style="margin: 5px 0;"><strong>受検URL:</strong> <input type="text" value="${testUrl}" readonly onclick="this.select()"></p>
+      <h5>問題一覧 (${test.questions.length}問):</h5>
+      <ol style="margin-left: 20px;">
+    `;
+
+    test.questions.forEach((q, qIdx) => {
+      html += `
+        <li style="margin-bottom:8px;">
+          ${q.text} (形式: ${q.type}) 
+          <br><small>正解: ${q.correct.join(', ')}</small>
+          <button class="btn btn-danger" style="padding:2px 6px; font-size:10px; margin-left:10px;" onclick="deleteQuestion(${tIdx}, ${qIdx})">問題を削除</button>
+        </li>
+      `;
+    });
+
+    html += `</ol>`;
+    card.innerHTML = html;
+    container.appendChild(card);
+  });
+}
+
+function deleteTest(testIdx) {
+  if (confirm('このテストおよび登録された問題を全て削除しますか？')) {
+    appData.tests.splice(testIdx, 1);
+    saveData();
+    renderAdminTestList();
+  }
+}
+
+function deleteQuestion(testIdx, questionIdx) {
+  if (confirm('この問題を削除しますか？')) {
+    appData.tests[testIdx].questions.splice(questionIdx, 1);
+    saveData();
+    renderAdminTestList();
+  }
+}
+
+// 動的テスト作成機能
+let newQuestionCount = 0;
+function addQuestionField() {
+  newQuestionCount++;
+  const container = document.getElementById('question-builder-container');
+  const qDiv = document.createElement('div');
+  qDiv.className = 'card';
+  qDiv.id = `q_build_${newQuestionCount}`;
+  qDiv.innerHTML = `
+    <h5>問題 ${newQuestionCount}</h5>
+    <label>問題文</label>
+    <input type="text" class="q-text" placeholder="例: 1+1の答えは？">
+    
+    <label>入力タイプ</label>
+    <select class="q-type">
+      <option value="single">単一選択 (ラジオボタン)</option>
+      <option value="multiple">複数選択 (チェックボックス)</option>
+      <option value="text">記述入力</option>
+    </select>
+
+    <label>選択肢 (カンマ区切りで入力 ※記述入力の場合は空欄)</label>
+    <input type="text" class="q-options" placeholder="例: 1, 2, 3, 4">
+
+    <label>正解 (カンマ区切りで入力 ※選択肢の文言と完全一致させること)</label>
+    <input type="text" class="q-correct" placeholder="例: 2">
+
+    <label><input type="checkbox" class="q-randomize" checked> 選択肢をランダム表示する</label>
+  `;
+  container.appendChild(qDiv);
+}
+
+function saveNewTest() {
+  const subject = document.getElementById('new-test-subject').value.trim();
+  const title = document.getElementById('new-test-title').value.trim();
+
+  if (!subject || !title) {
+    alert('教科名とタイトルを入力してください。');
+    return;
+  }
+
+  const qCards = document.querySelectorAll('#question-builder-container .card');
+  const questions = [];
+
+  qCards.forEach((card, idx) => {
+    const text = card.querySelector('.q-text').value.trim();
+    const type = card.querySelector('.q-type').value;
+    const optionsRaw = card.querySelector('.q-options').value.trim();
+    const correctRaw = card.querySelector('.q-correct').value.trim();
+    const randomize = card.querySelector('.q-randomize').checked;
+
+    if (text) {
+      questions.push({
+        id: `q_${Date.now()}_${idx}`,
+        type: type,
+        text: text,
+        options: optionsRaw ? optionsRaw.split(',').map(s => s.trim()) : [],
+        correct: correctRaw ? correctRaw.split(',').map(s => s.trim()) : [],
+        randomize: randomize
+      });
+    }
+  });
+
+  if (questions.length === 0) {
+    alert('問題を最低1問追加してください。');
+    return;
+  }
+
+  const newTest = {
+    id: `test_${Date.now()}`,
+    subject: subject,
+    title: title,
+    questions: questions
+  };
+
+  appData.tests.push(newTest);
+  saveData();
+
+  alert('テストを作成しました！');
+  document.getElementById('new-test-subject').value = '';
+  document.getElementById('new-test-title').value = '';
+  document.getElementById('question-builder-container').innerHTML = '';
+  newQuestionCount = 0;
+  
+  switchAdminTab('tests');
+}
+
+// 分析＆集計表示機能
+function initResultsView() {
+  const select = document.getElementById('result-test-select');
+  select.innerHTML = '';
+  appData.tests.forEach(test => {
+    const opt = document.createElement('option');
+    opt.value = test.id;
+    opt.innerText = `[${test.subject}] ${test.title}`;
+    select.appendChild(opt);
+  });
+  renderAnalytics();
+}
+
+function renderAnalytics() {
+  const testId = document.getElementById('result-test-select').value;
+  const filteredResponses = appData.responses.filter(r => r.testId === testId);
+
+  // 表の描画
+  const tbody = document.getElementById('result-table-body');
+  tbody.innerHTML = '';
+
+  let totalScore = 0;
+  const scoreBins = new Array(10).fill(0); // 0-9, 10-19... 90-100点台
+
+  filteredResponses.forEach(res => {
+    totalScore += res.score;
+    const binIdx = Math.min(Math.floor(res.score / 10), 9);
+    scoreBins[binIdx]++;
+
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td>${res.student.class}</td>
+      <td>${res.student.number}</td>
+      <td>${res.student.name}</td>
+      <td><strong>${res.score}</strong> 点</td>
+      <td><span class="${res.violations > 0 ? 'warning' : ''}">${res.violations} 回</span></td>
+      <td>${res.submittedAt}</td>
+    `;
+    tbody.appendChild(tr);
+  });
+
+  const count = filteredResponses.length;
+  const avg = count > 0 ? (totalScore / count).toFixed(1) : 0;
+
+  document.getElementById('stat-count').innerText = count;
+  document.getElementById('stat-avg').innerText = avg;
+
+  // Chart.js 棒グラフ描画
+  const ctx = document.getElementById('scoreChart').getContext('2d');
+  if (scoreChartInstance) scoreChartInstance.destroy();
+
+  scoreChartInstance = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: ['0-9', '10-19', '20-29', '30-39', '40-49', '50-59', '60-69', '70-79', '80-89', '90-100'],
+      datasets: [{
+        label: '人数',
+        data: scoreBins,
+        backgroundColor: '#3498db'
+      }]
+    },
+    options: {
+      scales: {
+        y: { beginAtZero: true, stepSize: 1 }
+      }
+    }
+  });
+}
+
+// 成績リセット
+function resetResults() {
+  const testId = document.getElementById('result-test-select').value;
+  if (confirm('このテストの全受検結果をリセットしますか？（復元できません）')) {
+    appData.responses = appData.responses.filter(r => r.testId !== testId);
+    saveData();
+    renderAnalytics();
+  }
+}
+
+// 管理者パスワード変更
+async function changeAdminPassword() {
+  const current = document.getElementById('pass-current').value;
+  const newPass = document.getElementById('pass-new').value;
+
+  const currentHash = await sha256(current);
+  if (currentHash !== appData.adminPasswordHash) {
+    alert('現在のパスワードが正しくありません。');
+    return;
+  }
+
+  if (!newPass) {
+    alert('新しいパスワードを入力してください。');
+    return;
+  }
+
+  appData.adminPasswordHash = await sha256(newPass);
+  saveData();
+  alert('管理者パスワードを変更しました。');
+  document.getElementById('pass-current').value = '';
+  document.getElementById('pass-new').value = '';
+}
+
+// アプリ全体の全データ初期化
+function resetAllAppSystemData() {
+  if (confirm('すべてのテスト、問題、成績データを初期化しますか？')) {
+    localStorage.removeItem('cbt_app_data');
+    location.reload();
+  }
+}
+
+// 初期化実行
+window.onload = () => {
+  loadData();
+  checkUrlParams();
+};
+</script>
+</body>
+</html>
