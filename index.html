@@ -9,11 +9,10 @@
 
   <!-- Firebase SDK (v10) の読み込み -->
   <script type="module">
-import { initializeApp } from "firebase/app";
-import { getAnalytics } from "firebase/analytics";
-import{getFirestore, collection, addDoc, getDocs, doc, setDoc, deleteDoc, query, where}from"https://www.gstatic.com/firebasejs/10.0.0/firebase-firestore.js"
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.0.0/firebase-app.js";
+    import { getFirestore, collection, addDoc, getDocs, doc, setDoc, deleteDoc, query, where } from "https://www.gstatic.com/firebasejs/10.0.0/firebase-firestore.js";
 
-    // ★★★ ご自身の Firebase 設定情報に書き換えてください ★★★
+    // ★★★ ご自身の Firebase 設定情報 ★★★
     const firebaseConfig = {
       apiKey: "AIzaSyDDFMUpfFHdRfLA0lwGUT7pbMsQuAIn2nQ",
       authDomain: "cbttest-rog.firebaseapp.com",
@@ -277,7 +276,7 @@ function renderStudentTestList() {
     card.className = 'card';
     card.innerHTML = `
       <h4><span class="badge badge-primary">${test.subject}</span> ${test.title}</h4>
-      <p>問題数: ${test.questions.length}問</p>
+      <p>問題数: ${test.questions ? test.questions.length : 0}問</p>
       <button class="btn btn-success" style="margin-top:10px;" onclick="selectTestForStudent('${test.id}')">このテストを受ける</button>
     `;
     container.appendChild(card);
@@ -318,6 +317,8 @@ function renderTestForm() {
   const form = document.getElementById('test-form');
   form.innerHTML = '';
 
+  if (!currentTest.questions) return;
+
   currentTest.questions.forEach((q, idx) => {
     const qCard = document.createElement('div');
     qCard.className = 'card';
@@ -342,7 +343,7 @@ function renderTestForm() {
   });
 }
 
-// 端末ローカルへの一時保存（テスト途中脱落対策）
+// 端末ローカルへの一時保存
 function autoSaveDraft() {
   const answers = getEnteredAnswers();
   const draftKey = `cbt_draft_${currentTest.id}_${currentStudent.class}_${currentStudent.number}`;
@@ -356,7 +357,7 @@ function autoSaveDraft() {
 function loadDraftAnswers() {
   const draftKey = `cbt_draft_${currentTest.id}_${currentStudent.class}_${currentStudent.number}`;
   const saved = localStorage.getItem(draftKey);
-  if (!saved) return;
+  if (!saved || !currentTest.questions) return;
 
   const answers = JSON.parse(saved);
   currentTest.questions.forEach(q => {
@@ -380,6 +381,8 @@ function loadDraftAnswers() {
 
 function getEnteredAnswers() {
   const answers = {};
+  if (!currentTest.questions) return answers;
+
   currentTest.questions.forEach(q => {
     if (q.type === 'single') {
       const checked = document.querySelector(`input[name="q_${q.id}"]:checked`);
@@ -407,17 +410,19 @@ async function submitTest() {
   
   // 採点
   let score = 0;
-  const totalQuestions = currentTest.questions.length;
-  const pointsPerQuestion = 100 / totalQuestions;
+  const totalQuestions = currentTest.questions ? currentTest.questions.length : 0;
+  const pointsPerQuestion = totalQuestions > 0 ? (100 / totalQuestions) : 0;
 
-  currentTest.questions.forEach(q => {
-    const userAns = userAnswers[q.id] || [];
-    const correctAns = q.correct || [];
+  if (currentTest.questions) {
+    currentTest.questions.forEach(q => {
+      const userAns = userAnswers[q.id] || [];
+      const correctAns = q.correct || [];
 
-    if (JSON.stringify([...userAns].sort()) === JSON.stringify([...correctAns].sort())) {
-      score += pointsPerQuestion;
-    }
-  });
+      if (JSON.stringify([...userAns].sort()) === JSON.stringify([...correctAns].sort())) {
+        score += pointsPerQuestion;
+      }
+    });
+  }
 
   // Firestoreに登録
   try {
@@ -431,7 +436,6 @@ async function submitTest() {
       submittedAt: new Date().toLocaleString()
     });
 
-    // 下書きデータ削除
     const draftKey = `cbt_draft_${currentTest.id}_${currentStudent.class}_${currentStudent.number}`;
     localStorage.removeItem(draftKey);
 
@@ -509,6 +513,7 @@ function renderAdminTestList() {
     card.className = 'card';
     
     const testUrl = `${window.location.origin}${window.location.pathname}?testId=${test.id}`;
+    const qCount = test.questions ? test.questions.length : 0;
 
     let html = `
       <div style="display:flex; justify-content:space-between; align-items:center;">
@@ -516,19 +521,21 @@ function renderAdminTestList() {
         <button class="btn btn-danger" onclick="deleteTestFromCloud('${test.id}')">テスト全体を削除</button>
       </div>
       <p style="margin: 5px 0;"><strong>受検URL:</strong> <input type="text" value="${testUrl}" readonly onclick="this.select()"></p>
-      <h5>問題一覧 (${test.questions.length}問):</h5>
+      <h5>問題一覧 (${qCount}問):</h5>
       <ol style="margin-left: 20px;">
     `;
 
-    test.questions.forEach((q, qIdx) => {
-      html += `
-        <li style="margin-bottom:8px;">
-          ${q.text} (形式: ${q.type}) 
-          <br><small>正解: ${q.correct.join(', ')}</small>
-          <button class="btn btn-danger" style="padding:2px 6px; font-size:10px; margin-left:10px;" onclick="deleteQuestionFromCloud('${test.id}', ${qIdx})">問題を削除</button>
-        </li>
-      `;
-    });
+    if (test.questions) {
+      test.questions.forEach((q, qIdx) => {
+        html += `
+          <li style="margin-bottom:8px;">
+            ${q.text} (形式: ${q.type}) 
+            <br><small>正解: ${q.correct ? q.correct.join(', ') : ''}</small>
+            <button class="btn btn-danger" style="padding:2px 6px; font-size:10px; margin-left:10px;" onclick="deleteQuestionFromCloud('${test.id}', ${qIdx})">問題を削除</button>
+          </li>
+        `;
+      });
+    }
 
     html += `</ol>`;
     card.innerHTML = html;
@@ -549,7 +556,7 @@ async function deleteTestFromCloud(testId) {
 async function deleteQuestionFromCloud(testId, questionIdx) {
   if (confirm('この問題を削除しますか？')) {
     const targetTest = tests.find(t => t.id === testId);
-    if (!targetTest) return;
+    if (!targetTest || !targetTest.questions) return;
 
     targetTest.questions.splice(questionIdx, 1);
 
@@ -653,7 +660,7 @@ async function saveNewTest() {
   }
 }
 
-// 分析＆集計表示機能 (リアルタイムクラウド集計)
+// 分析＆集計表示機能
 function initResultsView() {
   const select = document.getElementById('result-test-select');
   select.innerHTML = '';
@@ -693,9 +700,9 @@ async function renderAnalytics() {
 
       const tr = document.createElement('tr');
       tr.innerHTML = `
-        <td>${res.student.class}</td>
-        <td>${res.student.number}</td>
-        <td>${res.student.name}</td>
+        <td>${res.student ? res.student.class : ''}</td>
+        <td>${res.student ? res.student.number : ''}</td>
+        <td>${res.student ? res.student.name : ''}</td>
         <td><strong>${res.score}</strong> 点</td>
         <td><span class="${res.violations > 0 ? 'warning' : ''}">${res.violations} 回</span></td>
         <td>${res.submittedAt}</td>
@@ -782,7 +789,6 @@ async function changeAdminPassword() {
 
 // 初期起動
 window.onload = () => {
-  // Firebaseの初期化完了をわずかに待って起動
   setTimeout(() => {
     loadTestsFromCloud();
   }, 500);
