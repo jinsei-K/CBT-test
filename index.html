@@ -11,6 +11,7 @@
   <script type="module">
 import { initializeApp } from "firebase/app";
 import { getAnalytics } from "firebase/analytics";
+import{getFirestore, collection, addDoc, getDocs, doc, setDoc, deleteDoc, query, where}from"https://www.gstatic.com/firebasejs/10.0.0/firebase-firestore.js"
 
     // ★★★ ご自身の Firebase 設定情報に書き換えてください ★★★
     const firebaseConfig = {
